@@ -1,4 +1,16 @@
-# 上肢动作规划与模拟调度
+# 上肢动作规划与真实动作库适配
+
+## 当前集成（2026-11-17）
+
+物理目录位于仓库根目录 g1-arm-teach-play/。config/motion_catalog.json 含 22 项预定义，实际录制需有 poses 或 motions 下的 .dat 及对应 metadata，并通过原库 tools/motion_library.py 校验。10 项录制资产数据有效且已批准；9 项可由 LLM 选择，neutral 留给 Scheduler 管理。验收盘点见 docs/experiments/g1-motion-inventory.md。
+
+actions.json 的每个 ID 等于物理 motion_name，一个物理动作包含多个 interaction_functions；每项说明社交功能、典型表达、上下文条件和禁用场景，semantic_intents 仅作短索引。kind 是规划类型，asset_type 是物理文件类型；单帧物理 motion 按 pose 规划，只有 greet_wave、invite_follow、emphasize_once 是多帧动态动作。neutral 保留在注册表并由调度器显式管理，llm_selectable=false；不会在每段话后自动插入。原 wave、point、hold_object、present_sweep、open_arms、compare_sides、frame_object、emphasis_beat 抽象 ID 均已移除。few_shots.json 覆盖每个动作的原始、扩展和易混淆场景及负例，并示范顺序组合；evaluation.json 按 seen、unseen、negative 分类。
+
+调用链：播报文本和交互上下文 → DeepSeek 先判断交互目的，再规划 action 与双文字锚点 → catalog.py 校验真实动作 → Scheduler 发 gesture.command → motion_executor.py 查询 metadata 并映射 Sequence → 原 motion_ctl.py 的 UNIX socket 客户端 → motion_library_server → G1。单个回复可按锚点顺序安排多个阶段动作；同一物理 ID 不会因多个功能标签重复触发。GestureService.set_interaction_context() 可传入交互阶段、历史和已知事实；未提供时为 unspecified。状态机可显式请求 request_base_pose()，但语音结束不会自动复位。多帧动作使用 transition_ms 和 duration_ms；单帧只使用 transition_ms。
+
+默认 GUIDEBOT_GESTURE_EXECUTION_MODE=simulation，仅记录转换结果。显式设置为 robot 后才查询服务状态并在 ownership=owned 时发送，不自动启动、接管或释放服务。当前关节限位 verified=false，真机模式会拒绝播放。打断时对本适配器已提交动作发送原服务的“停止”，不自动回 neutral。现场仍需验证关节限位、逐动作验收、服务部署、实际到位误差和资源冲突；模拟测试不代表真机验证。
+
+## 历史模拟方案（2026-11-15）
 
 当前执行器只输出 `gesture.command` 日志，不控制任何机器人、头部或手部。FunASR 沿用 `conversation/timestamps.py`，新动作逻辑均在本目录。语音不会等待 DeepSeek 或时间戳。
 

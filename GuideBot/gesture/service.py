@@ -1,4 +1,4 @@
-"""Nonblocking conversation adapter; all commands are simulation-only."""
+"""Nonblocking conversation adapter for planning and motion dispatch."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
@@ -11,6 +11,7 @@ import time
 from .catalog import Catalog, make_input, units_for, strict_json
 from .planner import Planner
 from .scheduler import Scheduler
+from .motion_executor import MotionExecutor
 
 
 @dataclass
@@ -26,11 +27,12 @@ class PlanningReply:
 
 class GestureService:
     def __init__(self, directory, on_event=None, *, catalog=None, planner=None, targets=(),
-                 debounce=.18, max_wait=.4):
+                 debounce=.18, max_wait=.4, interaction_context=None):
         self.directory = Path(directory)
         self.catalog = catalog or Catalog()
         self.planner = planner or Planner(self.catalog)
         self.targets = list(targets)
+        self.interaction_context = self._validate_interaction_context(interaction_context)
         if len({t['id'] for t in self.targets}) != len(self.targets):
             raise ValueError('Duplicate scene target ID')
         self.on_event = on_event
@@ -39,10 +41,34 @@ class GestureService:
         self.stopping = threading.Event()
         self.overflow = threading.Event()
         self.scheduler = Scheduler(self.catalog, self._emit)
+        self.executor = MotionExecutor(self.catalog)
         self.replies = {}
         self.pool = self.thread = self.log = None
         self.request_id = 0
         self.requests = []
+
+    @staticmethod
+    def _validate_interaction_context(context):
+        if context is None:
+            return {'stage': 'unspecified', 'history': []}
+        if not isinstance(context, dict) or set(context) - {'stage', 'history', 'facts'}:
+            raise ValueError('Invalid interaction context')
+        stage = context.get('stage', 'unspecified')
+        history = context.get('history', [])
+        facts = context.get('facts', [])
+        if (not isinstance(stage, str) or not stage.strip()
+                or not isinstance(history, list) or not isinstance(facts, list)
+                or not all(isinstance(value, str) and value.strip() for value in history + facts)):
+            raise ValueError('Invalid interaction context')
+        return {'stage': stage, 'history': list(history), 'facts': list(facts)}
+
+    def set_interaction_context(self, context):
+        self.interaction_context = self._validate_interaction_context(context)
+        self._emit('gesture.context', interaction_context=self.interaction_context)
+
+    def request_base_pose(self, reason='interaction_state_change'):
+        """Queue an explicit scheduler lifecycle transition; does not auto-reset."""
+        self.submit('base_pose', reason=reason)
 
     def start(self):
         if self.thread is not None:
@@ -66,6 +92,16 @@ class GestureService:
 
     def _emit(self, kind, **details):
         value = dict(kind=kind, monotonic=time.monotonic(), **details)
+        if kind in {'gesture.command', 'gesture.reset'}:
+            try:
+                execution = self.executor.handle(kind, details)
+                if execution is not None:
+                    value['execution'] = execution
+                    if kind == 'gesture.command' and execution['mode'] == 'robot':
+                        value['simulated'] = False
+                        details['simulated'] = False
+            except (ValueError, OSError, KeyError) as error:
+                value['execution_error'] = str(error)
         if self.log is not None:
             self.log.write(json.dumps(value, ensure_ascii=False) + '\n')
             self.log.flush()
@@ -74,6 +110,7 @@ class GestureService:
                 self.on_event(kind, **details)
             except Exception:
                 pass
+        return value
 
     def _cancel(self, rid, reason):
         state = self.replies.pop(rid, None)
@@ -95,6 +132,9 @@ class GestureService:
                     self._emit('gesture.ready', simulated=True, **value)
                 elif kind == 'cancel':
                     self._cancel(rid, value.get('reason', 'interrupted'))
+                elif kind == 'base_pose':
+                    self.scheduler.request_base_pose(
+                        value.get('reason', 'interaction_state_change'))
                 elif rid in self.scheduler.closed:
                     continue
                 elif kind in {'text', 'text_delta', 'done'}:
@@ -163,7 +203,8 @@ class GestureService:
             # Keep a short overlap for a lead-in whose object arrived later.
             first = max(0, len(units_for(state.submitted_text or '')) - 16)
             payload = make_input(rid, state.text, self.targets, existing,
-                                 range(first, len(reply.units)), state.complete)
+                                 range(first, len(reply.units)), state.complete,
+                                 self.interaction_context)
             state.in_flight = True
             state.submitted_text, state.submitted_complete = state.text, state.complete
             state.changed_at = 0

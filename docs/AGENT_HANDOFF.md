@@ -1,5 +1,13 @@
 # GuideBot 维护续接文档
 
+## 2026-11-17 G1 动作库集成
+
+本地开发分支 codex/integrate-g1-motion-library。物理动作库已复制到 g1-arm-teach-play/，源仓库保持只读。22 项定义中 10 项有有效且 approved 的 .dat 与 metadata；9 项供 LLM 选择，neutral 仅供 Scheduler 使用，12 项未录制。present_center 已于 2026-11-17 完成真机试播验收。详细盘点见 docs/experiments/g1-motion-inventory.md，当前语义设计见 GuideBot/gesture/README.md。
+
+现有双文字锚点规划、调度与语音链路保持。动作 ID 经 catalog.py 的原库校验映射到真实 motion_name；motion_executor.py 将 gesture.command 转为原 motion_library_server 的 Sequence socket 指令。默认 simulation；只有显式 GUIDEBOT_GESTURE_EXECUTION_MODE=robot 且限位 verified、ownership=owned、动作 approved 时才尝试播放。不启动或接管运动服务。当前限位未验证，不能真机播放；所有现场验收待人工完成。本机缺少 GuideBot Conda 环境与语音依赖，不能把本机离线测试写成完整环境验收。
+
+以下内容为此前时间戳和抽象动作实验记录；其中“执行端仍是模拟接口”、旧八个抽象动作及 21/21 模型评估只描述当时状态，不代表当前集成。
+
 更新日期：2026-11-15，Asia/Shanghai。请先读本节，再按任务查阅后文。
 
 ## 接手速读：当前项目状态

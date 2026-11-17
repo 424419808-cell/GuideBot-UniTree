@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import math
 import time
 
-from .catalog import units_for
+from .catalog import Plan, units_for
 
 
 @dataclass
@@ -34,6 +34,7 @@ class Scheduler:
         self.replies = {}
         self.closed = set()
         self.active = None
+        self.base_pose_serial = 0
 
     def reply(self, rid):
         if rid in self.closed:
@@ -41,7 +42,7 @@ class Scheduler:
         return self.replies.setdefault(rid, Reply())
 
     def event(self, kind, rid, **details):
-        self.emit(kind, response_id=rid, **details)
+        return self.emit(kind, response_id=rid, **details)
 
     def text(self, rid, text):
         reply = self.reply(rid)
@@ -103,6 +104,37 @@ class Scheduler:
         if reply is not None and reply.playback_origin is None:
             reply.playback_origin = origin
 
+    def request_base_pose(self, reason='interaction_state_change'):
+        """Explicit lifecycle request; never called automatically after speech."""
+        item = self.catalog.definitions.get('neutral')
+        asset = self.catalog.assets.get('neutral')
+        if not item or item.get('llm_selectable', True) or not asset:
+            raise ValueError('Scheduler base pose is unavailable')
+        now = self.clock()
+        if self.active and now < self.active['busy_until']:
+            return self.event('gesture.skipped', '__scheduler__', action='neutral',
+                              reason='upper_body_busy')
+        if asset['metadata']['status'] != 'approved':
+            raise ValueError('Scheduler base pose is not approved')
+        if self.active:
+            self.event('gesture.superseded', self.active['rid'],
+                       job_id=self.active['job'].id)
+        self.base_pose_serial += 1
+        job = Job(f'base_pose:{self.base_pose_serial}', Plan('neutral', 0, 0, {}),
+                  (), 0, status='committed')
+        arrival = now + .5
+        self.active = dict(rid='__scheduler__', job=job, end=None, busy_until=arrival)
+        result = self.event('gesture.command', '__scheduler__', job_id=job.id,
+                            action='neutral', scheduler_managed=True, simulated=True,
+                            start_monotonic=now, arrival_monotonic=arrival,
+                            compressed=False, reason=reason)
+        if isinstance(result, dict) and result.get('execution_error'):
+            job.status = 'skipped'
+            self.active = None
+            self.event('gesture.skipped', '__scheduler__', job_id=job.id,
+                       reason='execution_rejected', detail=result['execution_error'])
+        return result
+
     def discard_request(self, rid, request_id):
         reply = self.replies.get(rid)
         if reply:
@@ -160,10 +192,15 @@ class Scheduler:
             duration = job.plan.parameters.get('duration_s')
             self.active = dict(rid=rid, job=job, end=arrival_wall+duration if duration is not None else None,
                                busy_until=arrival_wall+(duration or 0))
-            self.event('gesture.command', rid, job_id=job.id, simulated=True,
-                       **job.plan.as_dict(), start_audio_s=start, arrival_audio_s=arrival,
-                       start_monotonic=max(now, start_wall), arrival_monotonic=arrival_wall,
-                       compressed=now > start_wall, alignment_version=reply.version)
+            result = self.event('gesture.command', rid, job_id=job.id, simulated=True,
+                                **job.plan.as_dict(), start_audio_s=start, arrival_audio_s=arrival,
+                                start_monotonic=max(now, start_wall), arrival_monotonic=arrival_wall,
+                                compressed=now > start_wall, alignment_version=reply.version)
+            if isinstance(result, dict) and result.get('execution_error'):
+                job.status = 'skipped'
+                self.active = None
+                self.event('gesture.skipped', rid, job_id=job.id,
+                           reason='execution_rejected', detail=result['execution_error'])
 
     def cancel(self, rid, reason='interrupted'):
         self.closed.add(rid)

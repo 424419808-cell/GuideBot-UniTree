@@ -18,29 +18,29 @@ class GestureTests(unittest.TestCase):
         self.text = '请注意这里的沙盘'
         self.units = units_for(self.text)
         self.targets = [{'id': 'sand_table'}]
-        self.row = dict(action='point', target_id='sand_table', start_unit=0, arrival_unit=3)
+        self.row = dict(action='present_right', start_unit=0, arrival_unit=3)
 
     def plan(self, **changes):
         return self.catalog.validate({**self.row, **changes}, range(len(self.units)), self.targets)
 
     def test_registry_drives_new_actions_without_prompt_code_changes(self):
-        self.assertEqual(len(self.catalog.actions), 8)
+        self.assertEqual(len(self.catalog.actions), 9)
+        self.assertNotIn('neutral', self.catalog.actions)
         examples = json.loads((DIRECTORY/'few_shots.json').read_text())
         shown = {a['action'] for e in examples for a in e['actions']}
-        self.assertEqual(shown, {'wave', 'point'})
+        self.assertEqual(shown, set(self.catalog.actions))
         with tempfile.TemporaryDirectory() as tmp:
             document = json.loads((DIRECTORY/'actions.json').read_text())
-            document['actions'].append(dict(id='custom_pose', name='测试姿态', kind='pose',
-                                            description='新增动作', parameters={}, required=[]))
+            document['actions'][1]['description'] = '自定义欢迎描述'
             document['actions'][0]['enabled'] = False
             path = Path(tmp)/'actions.json'
             path.write_text(json.dumps(document))
             catalog = Catalog(path)
             prompt = messages(catalog, make_input('r', self.text))
-            self.assertIn('custom_pose', prompt[0]['content'])
-            self.assertNotIn('"action": "wave"', ''.join(m['content'] for m in prompt))
-            plan = catalog.validate(dict(action='custom_pose', start_unit=0, arrival_unit=1), range(8), [])
-            self.assertEqual(plan.action, 'custom_pose')
+            self.assertIn('自定义欢迎描述', prompt[0]['content'])
+            self.assertNotIn('"action": "neutral"', ''.join(m['content'] for m in prompt))
+            plan = catalog.validate(dict(action='greet_open', start_unit=0, arrival_unit=1), range(8), [])
+            self.assertEqual(plan.action, 'greet_open')
 
     def test_registry_rejects_duplicate_ids_and_pose_duration(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -64,7 +64,7 @@ class GestureTests(unittest.TestCase):
                 self.plan(**bad)
         for value in [True, float('nan'), float('inf'), -1, 10]:
             with self.subTest(value=value), self.assertRaises(ValueError):
-                self.catalog.validate(dict(action='wave', start_unit=0, arrival_unit=1, duration_s=value), range(8), [])
+                self.catalog.validate(dict(action='greet_wave', start_unit=0, arrival_unit=1, duration_s=value), range(8), [])
 
     def test_stream_decoder_handles_arbitrary_chunks_and_quoted_braces(self):
         value = {'actions': [self.row, dict(action='test', note='逗号, 括号{}与引号"') ]}
@@ -177,7 +177,7 @@ class GestureTests(unittest.TestCase):
 
     def test_motion_conflict_is_skipped_and_pose_can_be_superseded(self):
         scheduler = self.scheduler()
-        wave = self.catalog.validate(dict(action='wave', start_unit=0, arrival_unit=1, duration_s=2), range(8), [])
+        wave = self.catalog.validate(dict(action='greet_wave', start_unit=0, arrival_unit=1, duration_s=2), range(8), [])
         scheduler.replies['r'].jobs.clear()
         scheduler.add('r', wave, self.units)
         scheduler.add('r', self.plan(), self.units)
@@ -194,7 +194,7 @@ class GestureTests(unittest.TestCase):
         self.alignment(scheduler)
         self.now = 100.98
         scheduler.tick()
-        other = self.catalog.validate(dict(action='hold_object',start_unit=1,arrival_unit=2), range(8), [])
+        other = self.catalog.validate(dict(action='please_wait',start_unit=1,arrival_unit=2), range(8), [])
         scheduler.add('r', other, self.units)
         scheduler.alignment('r', dict(version=2, anchors=[
             dict(index=i,text=u['text'],text_offset=u['text_offset'],start=t)
@@ -209,7 +209,7 @@ class GestureTests(unittest.TestCase):
         self.alignment(scheduler)
         self.now = 100.98
         scheduler.tick()
-        other = self.catalog.validate(dict(action='hold_object',start_unit=4,arrival_unit=5), range(8), [])
+        other = self.catalog.validate(dict(action='please_wait',start_unit=4,arrival_unit=5), range(8), [])
         scheduler.add('r', other, self.units)
         rows = [dict(index=i,text=u['text'],text_offset=u['text_offset'],start=t)
                 for i,u,t in [(0,self.units[0],1.),(3,self.units[3],2.),
@@ -234,7 +234,7 @@ class GestureTests(unittest.TestCase):
         planner = Planner(self.catalog, api_key='not-a-real-key', session=http)
         plans = []
         stats = planner.plan(make_input('r',self.text,self.targets), plans.append)
-        self.assertEqual([p.action for p in plans], ['point'])
+        self.assertEqual([p.action for p in plans], ['present_right'])
         self.assertEqual(stats['invalid_actions'], 1)
         response.status_code = 401
         response.text = 'private-server-response'

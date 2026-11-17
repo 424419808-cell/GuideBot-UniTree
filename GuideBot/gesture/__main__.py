@@ -20,6 +20,13 @@ def evaluate(args, catalog):
     shown = {a['action'] for e in examples if all(a['action'] in catalog.actions for a in e['actions'])
              for a in e['actions']}
     targets = load_targets(args.targets)
+    for case in cases:
+        if case.get('group') not in {'seen', 'unseen', 'negative'}:
+            raise ValueError('Evaluation case needs seen, unseen or negative group')
+        if (case['group'] == 'negative') != (not case['expected']):
+            raise ValueError('Evaluation group and expected actions disagree')
+        if any(action not in catalog.actions for action in case['expected']):
+            raise ValueError('Evaluation references unavailable physical action')
     args.output.mkdir(parents=True, exist_ok=True, mode=0o700)
     results = []
     for repeat in range(args.repeats):
@@ -27,7 +34,8 @@ def evaluate(args, catalog):
             if args.case and case['id'] not in args.case:
                 continue
             plans = []
-            payload = make_input(case['id'], case['text'], case.get('targets', targets), complete=True)
+            payload = make_input(case['id'], case['text'], case.get('targets', targets), complete=True,
+                                 interaction_context=case.get('interaction_context'))
             try:
                 stats = planner.plan(payload, lambda p: plans.append(p.as_dict()), threading.Event())
                 names = [p['action'] for p in plans]
@@ -36,14 +44,14 @@ def evaluate(args, catalog):
                                     and ('target_id' not in case or p.get('target_id') == case['target_id'])
                                     for p in plans)
                 row = dict(case_id=case['id'], repeat=repeat, expected=case['expected'],
+                           interaction=case.get('interaction'),
                            plans=plans, detection_pass=exact, parameters_pass=exact and parameters_ok,
-                           few_shot_group=('negative' if not case['expected'] else
-                                           'seen' if set(case['expected']) <= shown else 'unseen'), **stats)
+                           few_shot_group=case['group'], **stats)
             except Exception as error:
-                row = dict(case_id=case['id'], repeat=repeat, expected=case['expected'], plans=plans,
+                row = dict(case_id=case['id'], repeat=repeat, expected=case['expected'],
+                           interaction=case.get('interaction'), plans=plans,
                            detection_pass=False, parameters_pass=False, error=str(error),
-                           few_shot_group=('negative' if not case['expected'] else
-                                           'seen' if set(case['expected']) <= shown else 'unseen'))
+                           few_shot_group=case['group'])
             results.append(row)
             (args.output / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding='utf-8')
             print(case['id'], 'PASS' if row['parameters_pass'] else 'FAIL',
@@ -59,6 +67,11 @@ def evaluate(args, catalog):
     for group in ('seen', 'unseen', 'negative'):
         rows = [r for r in results if r.get('few_shot_group') == group]
         summary[group] = dict(cases=len(rows), passed=sum(r['parameters_pass'] for r in rows))
+    for function in sorted({case.get('interaction') for case in cases if case.get('interaction')}):
+        rows = [row for row in results if row.get('interaction') == function]
+        summary.setdefault('interaction_functions', {})[function] = dict(
+            cases=len(rows), detected=sum(row['detection_pass'] for row in rows),
+            passed=sum(row['parameters_pass'] for row in rows))
     for metric in ('first_action_seconds', 'total_seconds'):
         values = sorted(r[metric] for r in results if r.get(metric) is not None)
         summary[metric] = dict(median=statistics.median(values), maximum=max(values)) if values else {}
