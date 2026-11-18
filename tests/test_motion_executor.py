@@ -32,7 +32,7 @@ class MotionExecutorTests(unittest.TestCase):
             self.assertEqual(asset['entry']['name'], self.catalog.actions[name]['motion_name'])
             self.assertEqual(asset['metadata']['sha256'],
                              self.catalog.library.checksum(self.catalog.library.asset_path(
-                                 asset['entry'], MOTION_ROOT / 'motions', MOTION_ROOT / 'poses')))
+                                 asset['entry'], MOTION_ROOT / 'assets/motions', MOTION_ROOT / 'assets/poses')))
 
     def test_few_shots_and_prompt(self):
         examples = json.loads((DIRECTORY / 'few_shots.json').read_text())
@@ -81,7 +81,7 @@ class MotionExecutorTests(unittest.TestCase):
             root = Path(tmp)
             shutil.copytree(MOTION_ROOT, root / 'library')
             library = root / 'library'
-            meta_path = library / 'metadata/greet_open.json'
+            meta_path = library / 'assets/metadata/greet_open.json'
             meta = json.loads(meta_path.read_text())
             meta['sha256'] = '0' * 64
             meta_path.write_text(json.dumps(meta))
@@ -150,6 +150,58 @@ class MotionExecutorTests(unittest.TestCase):
         scheduler.tick()
         self.assertIsNone(scheduler.active)
         self.assertIn('gesture.skipped', events)
+
+    def test_immediate_dispatch_does_not_wait_for_alignment_or_playback(self):
+        events = []
+        def emit(kind, **details):
+            events.append((kind, details))
+            return {'mode': 'robot'} if kind == 'gesture.command' else None
+        scheduler = Scheduler(self.catalog, emit, clock=lambda: 100, immediate=True)
+        from GuideBot.gesture.catalog import units_for
+        units = units_for('欢迎大家')
+        plan = self.catalog.validate(
+            {'action': 'greet_open', 'start_unit': 0, 'arrival_unit': 1},
+            range(len(units)), [], {'stage': 'welcome'})
+        scheduler.text('r', '欢迎大家')
+        scheduler.add('r', plan, units)
+        scheduler.tick()
+        command = next(details for kind, details in events if kind == 'gesture.command')
+        self.assertEqual(command['timing_mode'], 'immediate')
+        self.assertEqual(command['start_monotonic'], 100)
+        self.assertEqual(command['arrival_monotonic'], 102)
+        self.assertFalse(any(kind == 'gesture.skipped' for kind, _ in events))
+        scheduler.add('r', plan, units)
+        scheduler.tick()
+        self.assertEqual(sum(kind == 'gesture.command' for kind, _ in events), 1)
+
+    def test_immediate_dispatch_failure_releases_scheduler_resource(self):
+        events = []
+        def emit(kind, **details):
+            events.append((kind, details))
+            return {'execution_error': 'motion service busy'} if kind == 'gesture.command' else None
+        scheduler = Scheduler(self.catalog, emit, clock=lambda: 100, immediate=True)
+        from GuideBot.gesture.catalog import units_for
+        units = units_for('欢迎大家')
+        plan = self.catalog.validate(
+            {'action': 'greet_open', 'start_unit': 0, 'arrival_unit': 1},
+            range(len(units)), [], {'stage': 'welcome'})
+        scheduler.text('r', '欢迎大家')
+        scheduler.add('r', plan, units)
+        scheduler.tick()
+        self.assertIsNone(scheduler.active)
+        self.assertEqual(next(details['reason'] for kind, details in events
+                              if kind == 'gesture.skipped'), 'execution_rejected')
+
+    def test_robot_service_defaults_to_immediate_timing(self):
+        from GuideBot.gesture.service import GestureService
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict('os.environ', {'GUIDEBOT_GESTURE_EXECUTION_MODE': 'robot'}, clear=False):
+                service = GestureService(directory, catalog=self.catalog)
+                self.assertTrue(service.scheduler.immediate)
+            with patch.dict('os.environ', {'GUIDEBOT_GESTURE_EXECUTION_MODE': 'robot',
+                                           'GUIDEBOT_GESTURE_TIMING_MODE': 'aligned'}, clear=False):
+                service = GestureService(directory, catalog=self.catalog)
+                self.assertFalse(service.scheduler.immediate)
 
     def test_scheduler_can_explicitly_request_neutral_without_auto_reset(self):
         events = []

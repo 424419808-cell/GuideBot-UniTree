@@ -58,13 +58,13 @@ def library():
 
 
 def limits():
-    value = json.loads((ROOT / 'g1-arm-teach-play/config/arm_joint_limits.json').read_text())
+    value = json.loads((ROOT / 'GuideBot/hardware/g1_motion/config/arm_joint_limits.json').read_text())
     if value.get('verified') is not True:
         raise RuntimeError('hardware joint limits not verified; robot execution remains gated')
 
 
 def server():
-    if not (ROOT / 'g1-arm-teach-play/build/motion_library_server').is_file():
+    if not (ROOT / 'GuideBot/hardware/g1_motion/build/motion_library_server').is_file():
         raise FileNotFoundError('build/motion_library_server')
 
 

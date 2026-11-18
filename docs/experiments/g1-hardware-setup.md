@@ -40,34 +40,13 @@ GUIDEBOT_GESTURE_EXECUTION_MODE=simulation bash tools/guidebot.sh conversation -
 `--sync-knowledge`。模拟阶段检查会话目录中的 `gesture.jsonl`，区分 planned、
 command、skipped 和 execution_error；模型选中动作不代表动作已发送。
 
-真机联动使用两个终端。终端一：
+真机联动只需一个终端。机器人停稳后运行：
 
 ```bash
-bash tools/guidebot.sh motion-server
+GUIDEBOT_GESTURE_EXECUTION_MODE=robot python GuideBot/conversation/conversation.py
 ```
 
-输入 RUN 启动。服务默认 released，不会因启动直接接管。机器人停稳后在终端二：
-
-```bash
-bash tools/guidebot.sh motion acquire
-bash tools/guidebot.sh motion status
-```
-
-确认 ownership=owned、state=idle 后：
-
-```bash
-GUIDEBOT_GESTURE_EXECUTION_MODE=robot bash tools/guidebot.sh conversation
-```
-
-按 Enter 开始交互。首先测试欢迎或邀请提问，例如让机器人介绍完一个主题后邀请提问。
-动作依据机器人播报文本规划。停止对话后执行：
-
-```bash
-bash tools/guidebot.sh motion release
-bash tools/guidebot.sh motion status
-```
-
-确认 released 后才能进入导航或其他上肢控制流程。需要中止当前动作时：
+第一次按 Enter 后程序自动启动运动服务并接管上半身；第二次按 Enter 后自动停止动作、释放控制权并退出服务。已有运动服务时会拒绝启动，避免接管其他进程。动作依据机器人播报文本规划。需要中止当前动作时：
 
 ```bash
 bash tools/guidebot.sh motion stop
@@ -75,7 +54,7 @@ bash tools/guidebot.sh motion stop
 
 ## 限位来源与验证边界
 
-`config/arm_joint_limits.json` 中 14 个上肢关节的范围来自宇树官方仓库
+`GuideBot/hardware/g1_motion/config/arm_joint_limits.json` 中 14 个上肢关节的范围来自宇树官方仓库
 `unitreerobotics/unitree_ros/robots/g1_description/g1_29dof.urdf`。
 配置记录来源 URL、下载文件 SHA256、核验人/方式、时间与范围。已逐项核对关节顺序、
 有限数值区间，以及全部 10 个录制资产的所有帧。`verified=true` 仅表示这项配置与

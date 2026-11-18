@@ -33,7 +33,7 @@ def main():
                         help="Synchronize knowledge before starting the realtime session")
     parser.add_argument("--timestamps", action=argparse.BooleanOptionalAction, default=False,
                         help="Experimental background FunASR character timestamps; does not delay playback")
-    parser.add_argument('--gestures', action='store_true',
+    parser.add_argument('--gestures', action=argparse.BooleanOptionalAction, default=True,
                         help='DeepSeek gesture planning; simulation by default, execution mode from GUIDEBOT_GESTURE_EXECUTION_MODE')
     parser.add_argument('--gesture-registry', type=Path, help='Action registry JSON')
     parser.add_argument('--gesture-targets', type=Path, help='Scene target JSON; default no targets')
@@ -45,7 +45,7 @@ def start_conversation(*, sync_knowledge_before_start=False, diagnose_audio=DEFA
                        vad_energy=DEFAULT_VAD_ENERGY, aec=DEFAULT_AEC,
                        aec_delay_ms=DEFAULT_AEC_DELAY_MS, mic_gate_dbfs=DEFAULT_MIC_GATE_DBFS,
                        agent_directory=AGENT_DIRECTORY, timestamps=False,
-                       gestures=False, gesture_registry=None, gesture_targets=None):
+                       gestures=True, gesture_registry=None, gesture_targets=None):
     """Prepare agent content, optionally synchronize, then wait for manual audio start."""
     instructions = read_soul(agent_directory)
     secret = load_secret()
@@ -82,9 +82,17 @@ def start_conversation(*, sync_knowledge_before_start=False, diagnose_audio=DEFA
         print(f"Experimental FunASR timestamps: provisional updates + complete-response repair. Log: {directory / 'alignment.jsonl'}")
     if gestures:
         mode = os.environ.get('GUIDEBOT_GESTURE_EXECUTION_MODE', 'simulation')
-        print(f"DeepSeek gestures: execution mode={mode}; does not delay speech. Log: {directory / 'gesture.jsonl'}")
+        timing = os.environ.get('GUIDEBOT_GESTURE_TIMING_MODE',
+                                'immediate' if mode == 'robot' else 'aligned')
+        print(f"DeepSeek gestures: execution mode={mode}, timing={timing}; does not delay speech. Log: {directory / 'gesture.jsonl'}")
     wait_for_enter("Press Enter to start realtime conversation, or Ctrl+C to cancel. ")
+    motion_runtime = None
     try:
+        if gestures and os.environ.get('GUIDEBOT_GESTURE_EXECUTION_MODE', 'simulation') == 'robot':
+            from GuideBot.gesture.motion_runtime import MotionRuntime
+            motion_runtime = MotionRuntime()
+            motion_runtime.start()
+            print('Motion server acquired upper-body control.', flush=True)
         session.start()
         print("Connecting. Press Enter again at any time to stop.", flush=True)
         deadline = time.monotonic() + 20
@@ -97,7 +105,12 @@ def start_conversation(*, sync_knowledge_before_start=False, diagnose_audio=DEFA
                 sys.stdin.readline()
                 break
     finally:
-        result = session.stop()
+        try:
+            result = session.stop()
+        finally:
+            if motion_runtime is not None:
+                motion_runtime.stop()
+                print('Motion server released upper-body control.', flush=True)
         if directory.exists():
             (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print("Realtime conversation stopped.")

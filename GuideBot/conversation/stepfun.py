@@ -3,6 +3,7 @@
 import audioop
 import base64
 import json
+import os
 from pathlib import Path
 import queue
 import sys
@@ -80,13 +81,18 @@ class RealtimeSession:
                                 "start_updates": 0, "start_revisions": 0, "errors": []}
         self.playback_starts = {}
         options = backend_options = None
+        execution_mode = os.environ.get('GUIDEBOT_GESTURE_EXECUTION_MODE', 'simulation')
+        timing_mode = os.environ.get('GUIDEBOT_GESTURE_TIMING_MODE',
+                                     'immediate' if execution_mode == 'robot' else 'aligned')
+        gesture_alignment = gestures and timing_mode == 'aligned'
         if gestures:
             sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        if gesture_alignment:
             from GuideBot.gesture.timing import ALIGNMENT_OPTIONS, BACKEND_OPTIONS
             options, backend_options = dict(ALIGNMENT_OPTIONS), dict(BACKEND_OPTIONS)
         self.timestamps = (StreamingTimestamps(directory, self._alignment_event,
                                                alignment_options=options, backend_options=backend_options)
-                           if timestamps or gestures else None)
+                           if timestamps or gesture_alignment else None)
         self.gestures = None
         if gestures:
             from GuideBot.gesture.catalog import Catalog
@@ -96,7 +102,8 @@ class RealtimeSession:
                                            targets=load_targets(gesture_targets))
 
     def _gesture_event(self, kind, **details):
-        message = details.pop('message', '模拟上肢动作：' + kind)
+        mode = os.environ.get('GUIDEBOT_GESTURE_EXECUTION_MODE', 'simulation')
+        message = details.pop('message', ('真机上肢动作：' if mode == 'robot' else '模拟上肢动作：') + kind)
         self.report(kind, message, **details)
 
     def _alignment_event(self, kind, **details):

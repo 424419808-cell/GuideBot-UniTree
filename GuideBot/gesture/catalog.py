@@ -4,12 +4,12 @@ import json
 import math
 from pathlib import Path
 import re
-import sys
+from GuideBot.hardware.g1_motion import assets as motion_library
 
 from GuideBot.conversation.timestamps import text_units
 
 DIRECTORY = Path(__file__).resolve().parent
-MOTION_ROOT = DIRECTORY.parents[1] / 'g1-arm-teach-play'
+MOTION_ROOT = DIRECTORY.parents[0] / 'hardware/g1_motion'
 COMMAND_FIELDS = {'action', 'start_unit', 'arrival_unit', 'response_id', 'job_id', 'request_id',
                   'monotonic', 'kind', 'simulated', 'start_audio_s', 'arrival_audio_s',
                   'start_monotonic', 'arrival_monotonic', 'compressed', 'alignment_version'}
@@ -52,8 +52,6 @@ class Catalog:
         self.definitions = {}
         self.assets = {}
         self.motion_root = Path(motion_root)
-        sys.path.insert(0, str(self.motion_root / 'tools'))
-        import motion_library
         self.library = motion_library
         entries = motion_library.catalog_entries(self.motion_root / 'config/motion_catalog.json')
         known = set()
@@ -135,8 +133,8 @@ class Catalog:
                     if any(type(v) not in (int, float) or not math.isfinite(v) for v in (lo, hi)) or lo > hi:
                         raise ValueError('Numeric parameters need finite bounds')
             result, errors, _ = motion_library.inspect(
-                motion_name, entries, self.motion_root / 'motions',
-                self.motion_root / 'poses', self.motion_root / 'metadata')
+                motion_name, entries, self.motion_root / 'assets/motions',
+                self.motion_root / 'assets/poses', self.motion_root / 'assets/metadata')
             if not errors and result and result[1] and result[1].get('schema_version') == 3:
                 points, meta = result
                 if item['kind'] != ('motion' if len(points) > 1 else 'pose'):

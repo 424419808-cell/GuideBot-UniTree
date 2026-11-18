@@ -13,6 +13,12 @@ python GuideBot/conversation/conversation.py --timestamps
 
 按 Enter 开始，再按 Enter 结束。运行前需要本机 SDK、模型、依赖及本地密钥配置；
 以上命令不是全新机器的一键安装器。
+动作规划默认开启、默认仅模拟记录；真机联动使用
+`GUIDEBOT_GESTURE_EXECUTION_MODE=robot python GuideBot/conversation/conversation.py`，
+同一进程自动管理运动服务的启动、接管和释放。`--no-gestures` 可关闭动作规划。
+G1 动作服务及录制资产位于 `GuideBot/hardware/g1_motion/`；录制、试播和维护入口
+位于 `tools/motions/`。构建及操作步骤见 [动作模块说明](GuideBot/hardware/g1_motion/README.md)
+和 [动作库手册](docs/motions/motion-library.md)。
 
 维护后继续开发，请先阅读 [Agent 续接文档](docs/AGENT_HANDOFF.md)。
 `GuideBot/agent` 仅放身份提示词和知识文本。当前知识文本是待运营方核实的材料，

@@ -24,15 +24,27 @@ case "${1:-check}" in
         ;;
     preview)
         shift
-        exec "$PYTHON" g1-arm-teach-play/tools/motion_ctl.py preview "$@"
+        exec "$PYTHON" tools/motions/motion_ctl.py preview "$@"
         ;;
     motion-server)
-        cd "$ROOT/g1-arm-teach-play"
-        exec ./build/motion_library_server --start-released
+        cd "$ROOT/GuideBot/hardware/g1_motion"
+        exec ./build/motion_library_server --start-released "${@:2}"
+        ;;
+    record)
+        cd "$ROOT/GuideBot/hardware/g1_motion"
+        exec ./build/record_motion
+        ;;
+    motion-library)
+        shift
+        exec "$PYTHON" tools/motions/motion_library.py "$@"
+        ;;
+    motion-timing)
+        shift
+        exec "$PYTHON" tools/motions/motion_timing_ui.py "$@"
         ;;
     motion)
         shift
-        exec "$PYTHON" g1-arm-teach-play/tools/motion_ctl.py "$@"
+        exec "$PYTHON" tools/motions/motion_ctl.py "$@"
         ;;
-    *) echo 'Usage: bash tools/guidebot.sh {check|evaluate|conversation|preview|motion-server|motion} [options]' >&2; exit 2 ;;
+    *) echo 'Usage: bash tools/guidebot.sh {check|evaluate|conversation|preview|motion-server|motion|record|motion-library|motion-timing} [options]' >&2; exit 2 ;;
 esac

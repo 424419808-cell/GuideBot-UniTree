@@ -29,12 +29,13 @@ class Reply:
 
 class Scheduler:
     def __init__(self, catalog, emit, clock=time.monotonic, dispatch_lead=.03,
-                 pose_max_hold_s=30.):
+                 pose_max_hold_s=30., immediate=False):
         if type(pose_max_hold_s) not in (int, float) or not math.isfinite(pose_max_hold_s) or pose_max_hold_s <= 0:
             raise ValueError('pose_max_hold_s must be a positive finite Scheduler setting')
         self.catalog, self.emit, self.clock = catalog, emit, clock
         self.dispatch_lead = dispatch_lead
         self.pose_max_hold_s = float(pose_max_hold_s)
+        self.immediate = immediate
         self.replies = {}
         self.closed = set()
         self.active = None
@@ -175,6 +176,9 @@ class Scheduler:
             self.event('gesture.completed', self.active['rid'], job_id=self.active['job'].id)
             self.active['job'].status = 'completed'
             self.active = None
+        if self.immediate:
+            self._tick_immediate(now)
+            return
         ready = []
         for rid, reply in self.replies.items():
             for job in reply.jobs:
@@ -231,6 +235,36 @@ class Scheduler:
                 self.active = None
                 self.event('gesture.skipped', rid, job_id=job.id,
                            reason='execution_rejected', detail=result['execution_error'])
+
+    def _tick_immediate(self, now):
+        if self.active and now < self.active['busy_until']:
+            return
+        for rid, reply in self.replies.items():
+            for job in reply.jobs:
+                if job.status != 'waiting':
+                    continue
+                if self.active:
+                    self.active['job'].status = 'completed'
+                    self.event('gesture.superseded', self.active['rid'], job_id=self.active['job'].id)
+                arrival = now + 2.0
+                duration = job.plan.parameters.get('duration_s')
+                item = self.catalog.definitions[job.plan.action]
+                job.status = 'committed'
+                self.active = dict(rid=rid, job=job,
+                                   end=arrival+duration if duration is not None else None,
+                                   release_deadline=(arrival+self.pose_max_hold_s
+                                                     if item['kind'] == 'pose' and item.get('release_conditions') else None),
+                                   busy_until=arrival+(duration or 0))
+                result = self.event('gesture.command', rid, job_id=job.id,
+                                    **job.plan.as_dict(), simulated=True,
+                                    start_monotonic=now, arrival_monotonic=arrival,
+                                    timing_mode='immediate')
+                if isinstance(result, dict) and result.get('execution_error'):
+                    job.status = 'skipped'
+                    self.active = None
+                    self.event('gesture.skipped', rid, job_id=job.id,
+                               reason='execution_rejected', detail=result['execution_error'])
+                return
 
     def cancel(self, rid, reason='interrupted'):
         self.closed.add(rid)

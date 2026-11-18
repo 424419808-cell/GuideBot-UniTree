@@ -165,3 +165,5 @@ __pycache__/
 *.onnx
 artifacts/
 node_modules/
+GuideBot/hardware/g1_motion/build/
+Testing/

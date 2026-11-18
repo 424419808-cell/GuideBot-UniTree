@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
+import os
 from pathlib import Path
 import queue
 import re
@@ -40,8 +41,12 @@ class GestureService:
         self.queue = queue.Queue(maxsize=256)
         self.stopping = threading.Event()
         self.overflow = threading.Event()
-        self.scheduler = Scheduler(self.catalog, self._emit)
         self.executor = MotionExecutor(self.catalog)
+        timing_mode = os.getenv('GUIDEBOT_GESTURE_TIMING_MODE',
+                                'immediate' if self.executor.mode == 'robot' else 'aligned')
+        if timing_mode not in {'immediate', 'aligned'}:
+            raise ValueError('Invalid gesture timing mode')
+        self.scheduler = Scheduler(self.catalog, self._emit, immediate=timing_mode == 'immediate')
         self.replies = {}
         self.pool = self.thread = self.log = None
         self.request_id = 0

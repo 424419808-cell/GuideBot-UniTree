@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import time
 
-from .catalog import MOTION_ROOT
+from GuideBot.hardware.g1_motion.client import request as socket_request, SOCKET_NAME
 
 
 class MotionExecutor:
@@ -15,9 +15,6 @@ class MotionExecutor:
             raise ValueError('Invalid gesture execution mode')
         self.clock = clock
         if request is None:
-            import sys
-            sys.path.insert(0, str(MOTION_ROOT / 'tools'))
-            from motion_ctl import request as socket_request, SOCKET_NAME
             self.request = lambda payload: socket_request(SOCKET_NAME, payload)
         else:
             self.request = request

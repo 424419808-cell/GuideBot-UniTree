@@ -2,13 +2,15 @@
 
 ## 当前集成（2026-11-17）
 
-物理目录位于仓库根目录 g1-arm-teach-play/。config/motion_catalog.json 含 22 项预定义，实际录制需有 poses 或 motions 下的 .dat 及对应 metadata，并通过原库 tools/motion_library.py 校验。10 项录制资产数据有效且已批准；9 项可由 LLM 选择，neutral 留给 Scheduler 管理。验收盘点见 docs/experiments/g1-motion-inventory.md。
+真机初始联动测试暂用即时调度：`GUIDEBOT_GESTURE_EXECUTION_MODE=robot` 时，规划动作通过校验后直接下发，按当前时刻起 2 秒到位，不等待 FunASR 或语音锚点。动作仍受上下文、已验收资产、机器人 ownership/state 和上半身占用约束；播报结束或打断仍可停止动作。`gesture.jsonl` 的 `timing_mode=immediate` 标记此模式。需要恢复原有语音对齐实验时显式设置 `GUIDEBOT_GESTURE_TIMING_MODE=aligned`；模拟模式默认保留原对齐调度。
+
+物理动作模块位于 GuideBot/hardware/g1_motion/。config/motion_catalog.json 含 22 项预定义，实际录制需有 assets/poses 或 assets/motions 下的 .dat 及对应 assets/metadata，并通过 assets.py 校验。10 项录制资产数据有效且已批准；9 项可由 LLM 选择，neutral 留给 Scheduler 管理。验收盘点见 docs/experiments/g1-motion-inventory.md。
 
 actions.json 的每个 ID 等于物理 motion_name，一个物理动作包含多个 interaction_functions；每项说明社交功能、典型表达、上下文条件和禁用场景，semantic_intents 仅作短索引。kind 是规划类型，asset_type 是物理文件类型；单帧物理 motion 按 pose 规划，只有 greet_wave、invite_follow、emphasize_once 是多帧动态动作。neutral 保留在注册表并由调度器显式管理，llm_selectable=false；不会在每段话后自动插入。原 wave、point、hold_object、present_sweep、open_arms、compare_sides、frame_object、emphasis_beat 抽象 ID 均已移除。few_shots.json 覆盖每个动作的原始、扩展和易混淆场景及负例，并示范顺序组合；evaluation.json 按 seen、unseen、negative 分类。
 
-调用链：播报文本和交互上下文 → DeepSeek 先判断交互目的，再规划 action 与双文字锚点 → catalog.py 校验真实动作和可信结构化上下文 → Scheduler 发 gesture.command → motion_executor.py 使用 asset_type 定位已验收资产并映射 Sequence → 原 motion_ctl.py 的 UNIX socket 客户端 → motion_library_server → G1。单个回复可按锚点顺序安排多个阶段动作；同一物理 ID 不会因多个功能标签重复触发。GestureService.set_interaction_context() 可传入交互阶段、历史和已知事实，并应由状态机同时传入 navigation/scene/asr/dialogue/task 状态；缺少硬门禁字段时动作会被拒绝。通过 visitor_responded、task_completed、new_valid_input、display_target_changed 等布尔事件字段释放匹配姿态；Scheduler 默认最大保持 30 秒，可在 Scheduler 构造时配置。释放姿态只清除 Scheduler 的保持状态并发出 gesture.released，不自动插入 neutral；是否请求基础姿态由状态机显式决定。多帧动作使用 transition_ms 和 duration_ms；单帧只使用 transition_ms。
+调用链：播报文本和交互上下文 → DeepSeek 先判断交互目的，再规划 action 与双文字锚点 → catalog.py 校验真实动作和可信结构化上下文 → Scheduler 发 gesture.command → motion_executor.py 使用 asset_type 定位已验收资产并映射 Sequence → hardware/g1_motion/client.py 的 UNIX socket 客户端 → motion_library_server → G1。单个回复可按锚点顺序安排多个阶段动作；同一物理 ID 不会因多个功能标签重复触发。GestureService.set_interaction_context() 可传入交互阶段、历史和已知事实，并应由状态机同时传入 navigation/scene/asr/dialogue/task 状态；缺少硬门禁字段时动作会被拒绝。通过 visitor_responded、task_completed、new_valid_input、display_target_changed 等布尔事件字段释放匹配姿态；Scheduler 默认最大保持 30 秒，可在 Scheduler 构造时配置。释放姿态只清除 Scheduler 的保持状态并发出 gesture.released，不自动插入 neutral；是否请求基础姿态由状态机显式决定。多帧动作使用 transition_ms 和 duration_ms；单帧只使用 transition_ms。
 
-默认 GUIDEBOT_GESTURE_EXECUTION_MODE=simulation，仅记录转换结果。显式设置为 robot 后才查询服务状态并在 ownership=owned 时发送，不自动启动、接管或释放服务。关节限位已依据宇树官方 G1 29 自由度 URDF 核对名称、顺序及全部录制帧，并记录来源与核验范围；这不是现场标定或碰撞测试。打断时对本适配器已提交动作发送原服务的“停止”，不自动回 neutral。现场仍需验证实际到位误差和资源冲突；模拟测试不代表真机验证。本机配置与手动测试步骤见 docs/experiments/g1-hardware-setup.md。
+默认 GUIDEBOT_GESTURE_EXECUTION_MODE=simulation，仅记录转换结果。`conversation.py` 默认启用动作规划，可用 `--no-gestures` 关闭。显式设置为 robot 后，会话入口在第一次 Enter 后自动启动运动服务、接管上半身，并在会话结束时停止动作、释放控制权和退出服务。已有运动服务时拒绝启动。关节限位已依据宇树官方 G1 29 自由度 URDF 核对名称、顺序及全部录制帧，并记录来源与核验范围；这不是现场标定或碰撞测试。打断时对本适配器已提交动作发送原服务的“停止”，不自动回 neutral。现场仍需验证实际到位误差和资源冲突；模拟测试不代表真机验证。本机配置与手动测试步骤见 docs/experiments/g1-hardware-setup.md。
 
 ## 历史模拟方案（2026-11-15）
 

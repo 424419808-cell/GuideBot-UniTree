@@ -1,5 +1,18 @@
 # GuideBot 维护续接文档
 
+## 2026-11-18 G1 动作模块目录整合（当前结构）
+
+物理动作库已按 GuideBot 职责整合到 `GuideBot/hardware/g1_motion/`：
+`client.py` 为 socket 客户端，`assets.py` 为运行时与维护工具共用的资产校验，
+同目录的 C++ 服务和头文件负责执行；`config/` 和 `assets/` 存放目录、限位、轨迹及元数据。
+录制、试播、验收和时间编辑入口在 `tools/motions/`，统一脚本为 `tools/guidebot.sh`。
+旧嵌套 `g1-arm-teach-play/` 已从仓库中移除，独立源仓库 `/home/kwx/g1-arm-teach-play`
+未修改。构建命令和模块边界见 `GuideBot/hardware/g1_motion/README.md`；现场操作见
+`docs/motions/motion-library.md`。下文历史记录提到的旧目录仅用于说明当时状态。
+
+本次离线验证：GuideBot Python 108 项、动作工具 Python 38 项、C++ CTest 4 项及
+时间编辑器 JS 检查通过；`neutral` 试播校验和资产验收读取通过。未执行真机运动。
+
 ## 2026-11-18 本机真机测试准备（优先于下文历史状态）
 
 当前主机为用户的 G1 EDU+ 29 自由度环境。已建立 `/home/kwx/.conda/envs/GuideBot`
