@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--timestamps", action=argparse.BooleanOptionalAction, default=False,
                         help="Experimental background FunASR character timestamps; does not delay playback")
     parser.add_argument('--gestures', action='store_true',
-                        help='DeepSeek gesture planning with simulated execution; enables 4/.5/.25 timestamps')
+                        help='DeepSeek gesture planning; simulation by default, execution mode from GUIDEBOT_GESTURE_EXECUTION_MODE')
     parser.add_argument('--gesture-registry', type=Path, help='Action registry JSON')
     parser.add_argument('--gesture-targets', type=Path, help='Scene target JSON; default no targets')
     args = parser.parse_args()
@@ -81,7 +81,8 @@ def start_conversation(*, sync_knowledge_before_start=False, diagnose_audio=DEFA
     if timestamps:
         print(f"Experimental FunASR timestamps: provisional updates + complete-response repair. Log: {directory / 'alignment.jsonl'}")
     if gestures:
-        print(f"DeepSeek gestures: simulation only; does not delay speech. Log: {directory / 'gesture.jsonl'}")
+        mode = os.environ.get('GUIDEBOT_GESTURE_EXECUTION_MODE', 'simulation')
+        print(f"DeepSeek gestures: execution mode={mode}; does not delay speech. Log: {directory / 'gesture.jsonl'}")
     wait_for_enter("Press Enter to start realtime conversation, or Ctrl+C to cancel. ")
     try:
         session.start()

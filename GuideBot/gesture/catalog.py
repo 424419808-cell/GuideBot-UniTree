@@ -81,6 +81,12 @@ class Catalog:
             if not isinstance(action_context, list) or not all(
                     isinstance(value, str) and value.strip() for value in action_context):
                 raise ValueError('Invalid action context requirements')
+            release_conditions = item.get('release_conditions', [])
+            if not isinstance(release_conditions, list) or not all(
+                    isinstance(value, str) and value.strip() for value in release_conditions):
+                raise ValueError('Invalid release conditions')
+            if item['kind'] == 'pose' and selectable and not release_conditions:
+                raise ValueError('Selectable poses need explicit release conditions')
             for field in ('semantic_intents', 'example_phrases'):
                 values = item.get(field)
                 if not isinstance(values, list) or (selectable and not values) or not all(
@@ -144,10 +150,42 @@ class Catalog:
     def prompt_document(self):
         return {**self.document, 'actions': list(self.actions.values())}
 
-    def validate(self, row, eligible, targets):
+    @staticmethod
+    def context_allows(item, context):
+        """Enforce safety-relevant context from trusted structured state."""
+        context = context or {}
+        trigger = item.get('trigger_source')
+        if trigger == 'llm_navigation_context':
+            navigation = context.get('navigation', {})
+            return (isinstance(navigation, dict) and navigation.get('status') == 'ready'
+                    and bool(navigation.get('destination'))
+                    and navigation.get('route_confirmed') is True
+                    and navigation.get('movement_allowed') is True)
+        if trigger == 'llm_scene_context':
+            scene = context.get('scene', {})
+            expected = {'present_left': 'left', 'present_right': 'right',
+                        'present_center': 'center'}.get(item['id'])
+            return (expected is not None and isinstance(scene, dict)
+                    and scene.get('confirmed') is True and scene.get('direction') == expected
+                    and isinstance(scene.get('target_id'), str) and bool(scene['target_id']))
+        if trigger == 'asr_dialogue_state':
+            asr = context.get('asr', {})
+            dialogue = context.get('dialogue', {})
+            return (isinstance(asr, dict) and asr.get('needs_repeat') is True
+                    and isinstance(dialogue, dict)
+                    and dialogue.get('state') in {'clarification_needed', 'awaiting_rephrase',
+                                                  'missing_required_information'})
+        if trigger == 'llm_task_state':
+            task = context.get('task', {})
+            return isinstance(task, dict) and task.get('status') in {'running', 'waiting'}
+        return True
+
+    def validate(self, row, eligible, targets, interaction_context=None, *, enforce_context=True):
         if not isinstance(row, dict) or not isinstance(row.get('action'), str) or row['action'] not in self.actions:
             raise ValueError('Unknown or disabled action')
         item = self.actions[row['action']]
+        if enforce_context and not self.context_allows(item, interaction_context):
+            raise ValueError('Trusted interaction context does not satisfy action trigger source')
         base = {'action', 'start_unit', 'arrival_unit'}
         if not (base | set(item['required'])) <= set(row) or set(row) - base - set(item['parameters']):
             raise ValueError('Missing or unknown action fields')
@@ -192,7 +230,7 @@ def messages(catalog, payload, examples_path=DIRECTORY / 'few_shots.json'):
         value = make_input('example', example['text'], example['targets'], complete=True,
                            interaction_context=example.get('interaction_context'))
         for row in example['actions']:
-            catalog.validate(row, value['eligible_anchor_ids'], value['targets'])
+            catalog.validate(row, value['eligible_anchor_ids'], value['targets'], value['interaction_context'])
         result.extend([dict(role='user', content=json.dumps(value, ensure_ascii=False)),
                        dict(role='assistant', content=json.dumps({'actions': example['actions']}, ensure_ascii=False))])
     result.append(dict(role='user', content=json.dumps(payload, ensure_ascii=False)))

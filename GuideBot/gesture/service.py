@@ -50,8 +50,12 @@ class GestureService:
     @staticmethod
     def _validate_interaction_context(context):
         if context is None:
-            return {'stage': 'unspecified', 'history': []}
-        if not isinstance(context, dict) or set(context) - {'stage', 'history', 'facts'}:
+            return {'stage': 'unspecified', 'history': [], 'facts': []}
+        allowed = {'stage', 'history', 'facts', 'navigation', 'scene', 'asr', 'dialogue', 'task',
+                   'visitor_responded', 'interaction_changed', 'task_completed', 'task_cancelled',
+                   'new_valid_input', 'clarification_completed', 'interaction_cancelled',
+                   'display_target_changed', 'explanation_ended', 'action_switch_needed'}
+        if not isinstance(context, dict) or set(context) - allowed:
             raise ValueError('Invalid interaction context')
         stage = context.get('stage', 'unspecified')
         history = context.get('history', [])
@@ -60,10 +64,30 @@ class GestureService:
                 or not isinstance(history, list) or not isinstance(facts, list)
                 or not all(isinstance(value, str) and value.strip() for value in history + facts)):
             raise ValueError('Invalid interaction context')
-        return {'stage': stage, 'history': list(history), 'facts': list(facts)}
+        result = {'stage': stage, 'history': list(history), 'facts': list(facts)}
+        for key in ('navigation', 'scene', 'asr', 'dialogue', 'task'):
+            if key in context:
+                if not isinstance(context[key], dict):
+                    raise ValueError('Invalid structured interaction state')
+                result[key] = dict(context[key])
+        result.update({key: context[key] for key in allowed - {
+            'stage', 'history', 'facts', 'navigation', 'scene', 'asr', 'dialogue', 'task'
+        } if key in context})
+        return result
 
     def set_interaction_context(self, context):
         self.interaction_context = self._validate_interaction_context(context)
+        lifecycle = (
+            ('visitor_responded', 'visitor_responded'), ('interaction_changed', 'interaction_changed'),
+            ('task_completed', 'task_completed'), ('task_cancelled', 'task_cancelled'),
+            ('maximum_hold_time', 'maximum_hold_time'),
+            ('new_valid_input', 'new_valid_input'), ('clarification_completed', 'clarification_completed'),
+            ('interaction_cancelled', 'interaction_cancelled'), ('display_target_changed', 'display_target_changed'),
+            ('explanation_ended', 'explanation_ended'), ('action_switch_needed', 'action_switch_needed'),
+        )
+        for key, condition in lifecycle:
+            if self.interaction_context.get(key) is True:
+                self.submit('release_pose', condition=condition)
         self._emit('gesture.context', interaction_context=self.interaction_context)
 
     def request_base_pose(self, reason='interaction_state_change'):
@@ -135,6 +159,8 @@ class GestureService:
                 elif kind == 'base_pose':
                     self.scheduler.request_base_pose(
                         value.get('reason', 'interaction_state_change'))
+                elif kind == 'release_pose':
+                    self.scheduler.release_active(value['condition'])
                 elif rid in self.scheduler.closed:
                     continue
                 elif kind in {'text', 'text_delta', 'done'}:
@@ -160,7 +186,13 @@ class GestureService:
                 elif kind == 'action':
                     state = self.replies.get(rid)
                     if state and state.text.startswith(value['text']):
-                        self.scheduler.add(rid, value['plan'], value['units'], value['request_id'])
+                        item = self.catalog.actions.get(value['plan'].action)
+                        if item is None or not self.catalog.context_allows(item, self.interaction_context):
+                            self._emit('gesture.rejected', response_id=rid,
+                                       reason='trusted_interaction_context_changed',
+                                       action=value['plan'].action)
+                        else:
+                            self.scheduler.add(rid, value['plan'], value['units'], value['request_id'])
                     else:
                         self._emit('gesture.rejected', response_id=rid, reason='stale_planner_snapshot')
                 elif kind == 'result':
@@ -234,7 +266,10 @@ class GestureService:
         if self.thread and self.thread is not threading.current_thread():
             self.thread.join(timeout=3)
         if self.pool:
-            self.pool.shutdown(wait=True, cancel_futures=True)
+            try:
+                self.pool.shutdown(wait=True, cancel_futures=True)
+            except TypeError:
+                self.pool.shutdown(wait=True)
         if self.log:
             self.log.close()
 

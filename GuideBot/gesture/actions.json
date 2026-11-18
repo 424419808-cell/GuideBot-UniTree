@@ -30,6 +30,7 @@
       "parameters": {}, "required": [], "trigger_source": "llm_interaction_context",
       "llm_selectable": true, "context_requirements": ["符合所选 interaction_function 的阶段要求"],
       "hold_policy": "until_next_action_or_state_change",
+      "release_conditions": ["visitor_responded", "interaction_changed", "maximum_hold_time"],
       "post_action_policy": "scheduler_decides_no_automatic_neutral", "verified": true, "enabled": true
     },
     {
@@ -82,6 +83,7 @@
       "parameters": {}, "required": [], "trigger_source": "llm_scene_context",
       "llm_selectable": true, "context_requirements": ["场景信息确认目标位于机器人正前方"],
       "hold_policy": "until_next_action_or_state_change",
+      "release_conditions": ["display_target_changed", "explanation_ended", "action_switch_needed"],
       "post_action_policy": "scheduler_decides_no_automatic_neutral", "verified": true, "enabled": true
     },
     {
@@ -98,6 +100,7 @@
       "parameters": {}, "required": [], "trigger_source": "llm_scene_context",
       "llm_selectable": true, "context_requirements": ["场景信息确认目标位于机器人左侧"],
       "hold_policy": "until_next_action_or_state_change",
+      "release_conditions": ["display_target_changed", "explanation_ended", "action_switch_needed"],
       "post_action_policy": "scheduler_decides_no_automatic_neutral", "verified": true, "enabled": true
     },
     {
@@ -114,6 +117,7 @@
       "parameters": {}, "required": [], "trigger_source": "llm_scene_context",
       "llm_selectable": true, "context_requirements": ["场景信息确认目标位于机器人右侧"],
       "hold_policy": "until_next_action_or_state_change",
+      "release_conditions": ["display_target_changed", "explanation_ended", "action_switch_needed"],
       "post_action_policy": "scheduler_decides_no_automatic_neutral", "verified": true, "enabled": true
     },
     {
@@ -131,11 +135,12 @@
       "parameters": {}, "required": [], "trigger_source": "llm_task_state",
       "llm_selectable": true, "context_requirements": ["确有访客等待或需要告知的真实处理过程"],
       "hold_policy": "until_next_action_or_state_change",
+      "release_conditions": ["task_completed", "task_cancelled", "maximum_hold_time"],
       "post_action_policy": "scheduler_decides_no_automatic_neutral", "verified": true, "enabled": true
     },
     {
       "id": "request_repeat", "motion_name": "request_repeat", "asset_type": "motion", "kind": "pose",
-      "name": "澄清请求姿态", "description": "右臂抬起形成单帧询问姿态；没有耳部或头部动作。",
+      "name": "澄清请求姿态", "description": "右臂抬起，右手位于头部上方或附近，形成单帧询问姿态；头部没有主动运动。",
       "semantic_intents": ["请求重复", "请求澄清", "请求补充", "没有听清"],
       "interaction_functions": [
         {"function":"ask_repeat","description":"表达没有听清，并礼貌请求重复刚才内容。","example_phrases":["抱歉，我没听清，能再说一遍吗？","请您重复一下最后一句。"],"context_requirements":["访客刚刚说过内容","系统确实未能可靠识别"],"avoid_when":"机器人已经正确理解或只是复述他人请求。"},
@@ -148,11 +153,12 @@
       "parameters": {}, "required": [], "trigger_source": "asr_dialogue_state",
       "llm_selectable": true, "context_requirements": ["ASR/对话状态确认需要重复、补充或澄清"],
       "hold_policy": "until_next_action_or_state_change",
+      "release_conditions": ["new_valid_input", "clarification_completed", "interaction_cancelled", "maximum_hold_time"],
       "post_action_policy": "scheduler_decides_no_automatic_neutral", "verified": true, "enabled": true
     },
     {
       "id": "emphasize_once", "motion_name": "emphasize_once", "asset_type": "motion", "kind": "motion",
-      "name": "一次性重点强调", "description": "双臂沿三帧轨迹作一次小幅前臂强调，不循环成多次敲击。",
+      "name": "一次性重点强调", "description": "左手保持相对固定，右手位于左手上方，右手沿预设轨迹进行小幅上下及前后摆动，形成一次连续的重点强调动作。",
       "semantic_intents": ["强调重点", "突出结论", "安全提醒", "强调技术特点"],
       "interaction_functions": [
         {"function":"emphasize_key_point","description":"为单个重要信息提供一次身体强调。","example_phrases":["最重要的是先完成安全检查。","请特别留意这一点。"],"context_requirements":["本段只有一个清晰重点","强调与语音内容同步"],"avoid_when":"连续每句都强调或没有明确重点。"},

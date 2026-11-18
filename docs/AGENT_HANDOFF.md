@@ -1,5 +1,27 @@
 # GuideBot 维护续接文档
 
+## 2026-11-18 本机真机测试准备（优先于下文历史状态）
+
+当前主机为用户的 G1 EDU+ 29 自由度环境。已建立 `/home/kwx/.conda/envs/GuideBot`
+（Python 3.10.22），按用户提供的 `/home/kwx/requirements.txt` 安装依赖；仅在仓库外
+安装副本中替换 12 项不可迁移的 file:// 构建路径，原文件不变。`pip check` 通过。
+环境快照在 `~/.config/guidebot/environment.yml` 和 `requirements-installed.txt`。
+SDK、CycloneDDS、FunASR 模型、LocalVQE 均已就绪，模型与原生库保存在仓库外。
+入口与操作步骤见 `docs/experiments/g1-hardware-setup.md`。
+
+已验证：本地 preflight 全通过；102 项测试通过；FunASR INT8 实际加载及静音 PCM
+推理成功；真实 DeepSeek `open_question_expanded` 通过；知识库同步完成；通过 eth0
+执行真实机器人只读 GetVolume 返回成功。对话入口到达 Enter 提示，未开始录放音。
+沙箱内停止线程测试失败的原因是 socket.shutdown 被禁止；沙箱外完整测试通过，无需改代码。
+transformers 对 torch 2.5.1 的版本警告仍存在，但当前 FunASR 后端实际推理通过，未擅自修改用户版本。
+
+14 个上肢关节限位已依据官方 G1 29-DoF URDF 填写并记录来源与 SHA256，全部 10 个
+录制资产的关节顺序及所有帧范围核验通过。verified 表示模型/录制范围审计通过，不表示
+现场标定、碰撞验证或实机播放通过。本轮未修改已验收轨迹，未播放动作、接管运动或录音。
+实际动作试播及语音动作联动仍由操作员现场手动完成；音频仍必须 Enter 开始。
+导航、场景、ASR/对话、后台任务的真实状态源尚未接入 GestureService，相关门控保守拒绝；
+先验收 greet_open。Scheduler release 仅清除调度状态，不自动 neutral 或收回手臂。
+
 ## 2026-11-17 G1 动作库集成
 
 本地开发分支 codex/integrate-g1-motion-library。物理动作库已复制到 g1-arm-teach-play/，源仓库保持只读。22 项定义中 10 项有有效且 approved 的 .dat 与 metadata；9 项供 LLM 选择，neutral 仅供 Scheduler 使用，12 项未录制。present_center 已于 2026-11-17 完成真机试播验收。详细盘点见 docs/experiments/g1-motion-inventory.md，当前语义设计见 GuideBot/gesture/README.md。

@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from GuideBot.gesture.catalog import Catalog, MOTION_ROOT, DIRECTORY, make_input, messages
 from GuideBot.gesture.motion_executor import MotionExecutor
@@ -24,6 +25,8 @@ class MotionExecutorTests(unittest.TestCase):
         self.assertNotIn('neutral', self.catalog.actions)
         self.assertEqual(self.catalog.assets['greet_open']['frames'], 1)
         self.assertEqual(self.catalog.actions['greet_open']['kind'], 'pose')
+        self.assertEqual(self.catalog.actions['greet_open']['asset_type'], 'motion')
+        self.assertEqual(self.catalog.assets['greet_open']['entry']['type'], 'motion')
         for name in self.catalog.actions:
             asset = self.catalog.assets[name]
             self.assertEqual(asset['entry']['name'], self.catalog.actions[name]['motion_name'])
@@ -90,6 +93,8 @@ class MotionExecutorTests(unittest.TestCase):
         executor = MotionExecutor(self.catalog, mode='simulation', clock=lambda: 100)
         pose = executor.handle('gesture.command', self.event('greet_open'))
         self.assertEqual(pose['sequence']['序列']['steps'][0]['type'], 'motion')
+        center = executor.handle('gesture.command', self.event('present_center'))
+        self.assertEqual(center['sequence']['序列']['steps'][0]['type'], 'motion')
         self.assertNotIn('duration_ms', pose['sequence']['序列']['steps'][0])
         motion = executor.sequence(self.event('greet_wave', duration_s=2))
         self.assertEqual(motion['序列']['steps'][0]['duration_ms'], 2000)
@@ -105,8 +110,9 @@ class MotionExecutorTests(unittest.TestCase):
             sent.append(payload)
             return {'ok': True, 'status': {'ownership': 'owned', 'state': 'idle'}}
         executor = MotionExecutor(self.catalog, mode='robot', request=request, clock=lambda: 100)
-        with self.assertRaisesRegex(ValueError, 'Joint limits'):
-            executor.handle('gesture.command', self.event('greet_open'))
+        with patch('GuideBot.gesture.motion_executor.json.loads', return_value={'verified': False}):
+            with self.assertRaisesRegex(ValueError, 'Joint limits'):
+                executor.handle('gesture.command', self.event('greet_open'))
         self.assertEqual(sent, [])
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'library'
@@ -134,7 +140,7 @@ class MotionExecutorTests(unittest.TestCase):
         units = units_for(text)
         plan = self.catalog.validate(
             {'action': 'greet_open', 'start_unit': 0, 'arrival_unit': 1},
-            range(len(units)), [])
+            range(len(units)), [], {'stage': 'welcome'})
         scheduler.text('r', text)
         scheduler.add('r', plan, units)
         scheduler.playback('r', 100)
@@ -174,6 +180,24 @@ class MotionExecutorTests(unittest.TestCase):
         self.assertEqual(payload['interaction_context'], context)
         system_and_user = messages(self.catalog, payload)
         self.assertIn('"stage": "qa_invitation"', system_and_user[-1]['content'])
+
+    def test_latest_semantic_descriptions_and_release_contract(self):
+        definitions = {item['id']: item for item in self.catalog.document['actions']}
+        self.assertIn('左手保持相对固定', definitions['emphasize_once']['description'])
+        self.assertIn('上下及前后摆动', definitions['emphasize_once']['description'])
+        repeat = definitions['request_repeat']['description']
+        self.assertIn('右手位于头部上方或附近', repeat)
+        self.assertIn('头部没有主动运动', repeat)
+        expected = {
+            'please_wait': {'task_completed', 'task_cancelled', 'maximum_hold_time'},
+            'request_repeat': {'new_valid_input', 'clarification_completed', 'interaction_cancelled', 'maximum_hold_time'},
+            'greet_open': {'visitor_responded', 'interaction_changed', 'maximum_hold_time'},
+            'present_center': {'display_target_changed', 'explanation_ended', 'action_switch_needed'},
+            'present_left': {'display_target_changed', 'explanation_ended', 'action_switch_needed'},
+            'present_right': {'display_target_changed', 'explanation_ended', 'action_switch_needed'},
+        }
+        for action, conditions in expected.items():
+            self.assertTrue(conditions <= set(definitions[action]['release_conditions']))
 
 
 if __name__ == '__main__':

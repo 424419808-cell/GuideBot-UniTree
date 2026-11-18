@@ -28,13 +28,33 @@ class Reply:
 
 
 class Scheduler:
-    def __init__(self, catalog, emit, clock=time.monotonic, dispatch_lead=.03):
+    def __init__(self, catalog, emit, clock=time.monotonic, dispatch_lead=.03,
+                 pose_max_hold_s=30.):
+        if type(pose_max_hold_s) not in (int, float) or not math.isfinite(pose_max_hold_s) or pose_max_hold_s <= 0:
+            raise ValueError('pose_max_hold_s must be a positive finite Scheduler setting')
         self.catalog, self.emit, self.clock = catalog, emit, clock
         self.dispatch_lead = dispatch_lead
+        self.pose_max_hold_s = float(pose_max_hold_s)
         self.replies = {}
         self.closed = set()
         self.active = None
         self.base_pose_serial = 0
+
+    def release_active(self, condition):
+        """Release an active pose when a trusted lifecycle condition occurs."""
+        active = self.active
+        if not active or self.catalog.definitions.get(active['job'].plan.action, {}).get('kind') != 'pose':
+            return False
+        item = self.catalog.definitions.get(active['job'].plan.action, {})
+        if condition not in item.get('release_conditions', []):
+            return False
+        rid = active['rid']
+        job = active['job']
+        job.status = 'completed'
+        self.active = None
+        self.event('gesture.released', rid, job_id=job.id, action=job.plan.action,
+                   condition=condition)
+        return True
 
     def reply(self, rid):
         if rid in self.closed:
@@ -145,6 +165,12 @@ class Scheduler:
 
     def tick(self):
         now = self.clock()
+        if self.active and self.active.get('release_deadline') is not None and now >= self.active['release_deadline']:
+            rid, job = self.active['rid'], self.active['job']
+            job.status = 'completed'
+            self.active = None
+            self.event('gesture.released', rid, job_id=job.id,
+                       action=job.plan.action, condition='maximum_hold_time')
         if self.active and self.active['end'] is not None and now >= self.active['end']:
             self.event('gesture.completed', self.active['rid'], job_id=self.active['job'].id)
             self.active['job'].status = 'completed'
@@ -190,7 +216,11 @@ class Scheduler:
                 self.event('gesture.superseded', self.active['rid'], job_id=self.active['job'].id)
             job.status = 'committed'
             duration = job.plan.parameters.get('duration_s')
+            item = self.catalog.definitions[job.plan.action]
+            is_pose = item['kind'] == 'pose'
             self.active = dict(rid=rid, job=job, end=arrival_wall+duration if duration is not None else None,
+                               release_deadline=(arrival_wall+self.pose_max_hold_s
+                                                 if is_pose and item.get('release_conditions') else None),
                                busy_until=arrival_wall+(duration or 0))
             result = self.event('gesture.command', rid, job_id=job.id, simulated=True,
                                 **job.plan.as_dict(), start_audio_s=start, arrival_audio_s=arrival,
