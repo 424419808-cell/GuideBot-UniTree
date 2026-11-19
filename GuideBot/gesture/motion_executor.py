@@ -48,6 +48,13 @@ class MotionExecutor:
             raise ValueError('Insufficient transition time for saved motion profile')
         step = {'type': item['asset_type'], 'name': item['motion_name'],
                 'transition_ms': available_ms}
+        if 'total_ms' in event:
+            total_ms = event['total_ms']
+            if type(total_ms) is not int or not 1 <= total_ms <= 600000:
+                raise ValueError('Invalid action total duration')
+            step = {'type': item['asset_type'], 'name': item['motion_name'],
+                    'total_ms': total_ms}
+            return {'序列': {'sequence_name': 'guidebot_' + action, 'steps': [step]}}
         if asset['frames'] > 1:
             duration_ms = round(event['duration_s'] * 1000)
             if duration_ms < meta['nominal_duration_ms']:

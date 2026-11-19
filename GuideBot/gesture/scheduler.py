@@ -29,17 +29,19 @@ class Reply:
 
 class Scheduler:
     def __init__(self, catalog, emit, clock=time.monotonic, dispatch_lead=.03,
-                 pose_max_hold_s=30., immediate=False):
+                 pose_max_hold_s=30., immediate=False, auto_base_pose=False):
         if type(pose_max_hold_s) not in (int, float) or not math.isfinite(pose_max_hold_s) or pose_max_hold_s <= 0:
             raise ValueError('pose_max_hold_s must be a positive finite Scheduler setting')
         self.catalog, self.emit, self.clock = catalog, emit, clock
         self.dispatch_lead = dispatch_lead
         self.pose_max_hold_s = float(pose_max_hold_s)
         self.immediate = immediate
+        self.auto_base_pose = auto_base_pose
         self.replies = {}
         self.closed = set()
         self.active = None
         self.base_pose_serial = 0
+        self.return_to_base = False
 
     def release_active(self, condition):
         """Release an active pose when a trusted lifecycle condition occurs."""
@@ -178,6 +180,11 @@ class Scheduler:
             self.active = None
         if self.immediate:
             self._tick_immediate(now)
+            if self.auto_base_pose and self.active is None and not any(
+                    job.status == 'waiting' for reply in self.replies.values() for job in reply.jobs):
+                if self.return_to_base:
+                    self.return_to_base = False
+                    self.request_base_pose('gesture_finished')
             return
         ready = []
         for rid, reply in self.replies.items():
@@ -246,24 +253,42 @@ class Scheduler:
                 if self.active:
                     self.active['job'].status = 'completed'
                     self.event('gesture.superseded', self.active['rid'], job_id=self.active['job'].id)
-                arrival = now + 2.0
                 duration = job.plan.parameters.get('duration_s')
                 item = self.catalog.definitions[job.plan.action]
+                profile = self.catalog.assets[job.plan.action]['metadata'].get('timing_profile')
+                total_ms = None
+                if self.auto_base_pose and profile:
+                    weights = profile['phase_weights']
+                    weight_sum = sum(weights.values())
+                    total_ms = profile['minimum_total_ms']
+                    if duration is not None and weights['core']:
+                        total_ms = max(total_ms, math.ceil(duration * 1000 * weight_sum / weights['core']))
+                    if total_ms > 600000:
+                        job.status = 'skipped'
+                        self.event('gesture.skipped', rid, job_id=job.id, reason='sequence_too_long')
+                        continue
+                    arrival = now + total_ms * weights['transition'] / weight_sum / 1000
+                    finish = now + total_ms / 1000
+                else:
+                    arrival = now + 2.0
+                    finish = arrival + duration if duration is not None else None
                 job.status = 'committed'
                 self.active = dict(rid=rid, job=job,
-                                   end=arrival+duration if duration is not None else None,
+                                   end=finish,
                                    release_deadline=(arrival+self.pose_max_hold_s
                                                      if item['kind'] == 'pose' and item.get('release_conditions') else None),
-                                   busy_until=arrival+(duration or 0))
+                                   busy_until=finish if finish is not None else arrival)
                 result = self.event('gesture.command', rid, job_id=job.id,
                                     **job.plan.as_dict(), simulated=True,
                                     start_monotonic=now, arrival_monotonic=arrival,
-                                    timing_mode='immediate')
+                                    timing_mode='immediate', **({'total_ms': total_ms} if total_ms else {}))
                 if isinstance(result, dict) and result.get('execution_error'):
                     job.status = 'skipped'
                     self.active = None
                     self.event('gesture.skipped', rid, job_id=job.id,
                                reason='execution_rejected', detail=result['execution_error'])
+                elif self.auto_base_pose:
+                    self.return_to_base = True
                 return
 
     def cancel(self, rid, reason='interrupted'):
@@ -276,4 +301,5 @@ class Scheduler:
                     self.event('gesture.cancelled', rid, job_id=job.id, reason=reason)
         if self.active and self.active['rid'] == rid:
             self.active = None
+            self.return_to_base = False
             self.event('gesture.reset', rid, simulated=True, reason=reason)

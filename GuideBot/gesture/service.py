@@ -46,7 +46,8 @@ class GestureService:
                                 'immediate' if self.executor.mode == 'robot' else 'aligned')
         if timing_mode not in {'immediate', 'aligned'}:
             raise ValueError('Invalid gesture timing mode')
-        self.scheduler = Scheduler(self.catalog, self._emit, immediate=timing_mode == 'immediate')
+        self.scheduler = Scheduler(self.catalog, self._emit, immediate=timing_mode == 'immediate',
+                                   auto_base_pose=self.executor.mode == 'robot' and timing_mode == 'immediate')
         self.replies = {}
         self.pool = self.thread = self.log = None
         self.request_id = 0

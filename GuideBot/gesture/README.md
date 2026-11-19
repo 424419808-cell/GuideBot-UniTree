@@ -2,7 +2,8 @@
 
 ## 当前集成（2026-11-17）
 
-真机初始联动测试暂用即时调度：`GUIDEBOT_GESTURE_EXECUTION_MODE=robot` 时，规划动作通过校验后直接下发，按当前时刻起 2 秒到位，不等待 FunASR 或语音锚点。动作仍受上下文、已验收资产、机器人 ownership/state 和上半身占用约束；播报结束或打断仍可停止动作。`gesture.jsonl` 的 `timing_mode=immediate` 标记此模式。需要恢复原有语音对齐实验时显式设置 `GUIDEBOT_GESTURE_TIMING_MODE=aligned`；模拟模式默认保留原对齐调度。
+真机初始联动测试暂用即时调度：`GUIDEBOT_GESTURE_EXECUTION_MODE=robot` 时，规划动作通过校验后直接下发，不等待 FunASR 或语音锚点。动作仍受上下文、已验收资产、机器人 ownership/state 和上半身占用约束；播报结束或打断仍可停止动作。`gesture.jsonl` 的 `timing_mode=immediate` 标记此模式。需要恢复原有语音对齐实验时显式设置 `GUIDEBOT_GESTURE_TIMING_MODE=aligned`；模拟模式默认保留原对齐调度。
+即时真机调度使用动作元数据中已保存的入口、核心、保持比例和最短总时长。静态姿态使用最短总时长；动态动作以规划的 `duration_s` 作为核心轨迹目标时长，按比例推算总时长并遵守最短值。保持阶段结束后，如没有待执行动作，调度器请求一次 `neutral`；已有下一动作则直接衔接，中断时不会自动回归。`neutral` 只改变上肢姿态，不释放控制权。显式使用语音对齐或模拟模式时仍沿用原调度策略。
 
 物理动作模块位于 GuideBot/hardware/g1_motion/。config/motion_catalog.json 含 22 项预定义，实际录制需有 assets/poses 或 assets/motions 下的 .dat 及对应 assets/metadata，并通过 assets.py 校验。10 项录制资产数据有效且已批准；9 项可由 LLM 选择，neutral 留给 Scheduler 管理。验收盘点见 docs/experiments/g1-motion-inventory.md。
 

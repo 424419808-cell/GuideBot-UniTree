@@ -203,6 +203,81 @@ class MotionExecutorTests(unittest.TestCase):
                 service = GestureService(directory, catalog=self.catalog)
                 self.assertFalse(service.scheduler.immediate)
 
+    def test_robot_profile_finishes_hold_then_returns_to_neutral(self):
+        from GuideBot.gesture.catalog import units_for
+        now = [100.0]
+        events = []
+        def emit(kind, **details):
+            events.append((kind, details))
+            return {'mode': 'robot'} if kind == 'gesture.command' else None
+        scheduler = Scheduler(self.catalog, emit, clock=lambda: now[0],
+                              immediate=True, auto_base_pose=True)
+        units = units_for('欢迎大家')
+        plan = self.catalog.validate(
+            {'action': 'greet_open', 'start_unit': 0, 'arrival_unit': 1},
+            range(len(units)), [], {'stage': 'welcome'})
+        scheduler.text('r', '欢迎大家')
+        scheduler.add('r', plan, units)
+        scheduler.tick()
+        command = next(details for kind, details in events if kind == 'gesture.command')
+        self.assertEqual(command['total_ms'], 1500)
+        self.assertEqual(command['arrival_monotonic'], 100.5)
+        executor = MotionExecutor(self.catalog, mode='simulation', clock=lambda: 100)
+        self.assertEqual(executor.sequence(command)['序列']['steps'][0]['total_ms'], 1500)
+        now[0] = 101.49
+        scheduler.tick()
+        self.assertEqual(sum(kind == 'gesture.command' for kind, _ in events), 1)
+        now[0] = 101.5
+        scheduler.tick()
+        self.assertEqual([row['action'] for kind, row in events if kind == 'gesture.command'],
+                         ['greet_open', 'neutral'])
+        scheduler.tick()
+        self.assertEqual(sum(kind == 'gesture.command' for kind, _ in events), 2)
+
+    def test_robot_profile_dynamic_core_duration_and_next_action(self):
+        from GuideBot.gesture.catalog import units_for
+        now = [100.0]
+        events = []
+        def emit(kind, **details):
+            events.append((kind, details))
+            return {'mode': 'robot'} if kind == 'gesture.command' else None
+        scheduler = Scheduler(self.catalog, emit, clock=lambda: now[0],
+                              immediate=True, auto_base_pose=True)
+        units = units_for('欢迎大家')
+        scheduler.text('r', '欢迎大家')
+        for action in ('greet_wave', 'greet_open'):
+            row = {'action': action, 'start_unit': 0, 'arrival_unit': 1}
+            if action == 'greet_wave':
+                row['duration_s'] = 2
+            scheduler.add('r', self.catalog.validate(row, range(len(units)), [],
+                                                      {'stage': 'welcome'}), units)
+        scheduler.tick()
+        first = next(row for kind, row in events if kind == 'gesture.command')
+        self.assertEqual(first['total_ms'], 4000)
+        self.assertEqual(first['arrival_monotonic'], 101.0)
+        now[0] = 104.0
+        scheduler.tick()
+        self.assertEqual([row['action'] for kind, row in events if kind == 'gesture.command'],
+                         ['greet_wave', 'greet_open'])
+
+    def test_cancelled_robot_action_does_not_return_to_neutral(self):
+        from GuideBot.gesture.catalog import units_for
+        events = []
+        def emit(kind, **details):
+            events.append((kind, details))
+            return {'mode': 'robot'} if kind == 'gesture.command' else None
+        scheduler = Scheduler(self.catalog, emit, clock=lambda: 100,
+                              immediate=True, auto_base_pose=True)
+        units = units_for('欢迎大家')
+        scheduler.text('r', '欢迎大家')
+        scheduler.add('r', self.catalog.validate(
+            {'action': 'greet_open', 'start_unit': 0, 'arrival_unit': 1},
+            range(len(units)), [], {'stage': 'welcome'}), units)
+        scheduler.tick()
+        scheduler.cancel('r')
+        scheduler.tick()
+        self.assertEqual(sum(kind == 'gesture.command' for kind, _ in events), 1)
+
     def test_scheduler_can_explicitly_request_neutral_without_auto_reset(self):
         events = []
         def emit(kind, **details):
